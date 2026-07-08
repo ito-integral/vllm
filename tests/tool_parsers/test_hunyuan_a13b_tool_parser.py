@@ -189,3 +189,23 @@ def test_hunyuan_a13b_tool_parser_non_ascii():
     args = tool_calls[0].function.arguments
     assert "北京" in args
     assert "\\u" not in args
+
+
+def test_hunyuan_a13b_streaming_preserves_args_after_empty_args_tool():
+    mock_tokenizer = MagicMock()
+    tool_parser: ToolParser = ToolParserManager.get_tool_parser("hunyuan_a13b")(
+        mock_tokenizer
+    )
+    model_output = (
+        '<tool_calls>[{"name": "list_files", "arguments": {}}, '
+        '{"name": "read_file", "arguments": {"path": "README.md"}}]</tool_calls>'
+    )
+    reconstructor = run_tool_extraction_streaming(tool_parser, list(model_output))
+
+    assert [
+        (tool_call.function.name, tool_call.function.arguments)
+        for tool_call in reconstructor.tool_calls
+    ] == [
+        ("list_files", "{}"),
+        ("read_file", '{"path": "README.md"}'),
+    ]

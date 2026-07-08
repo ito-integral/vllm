@@ -403,60 +403,52 @@ class xLAMToolParser(ToolParser):
 
             # Process arguments for the current tool
             if current_idx >= 0 and current_idx < tool_count:
-                # Support both regular and empty argument objects
-                # First, check for the empty arguments case: "arguments": {}
-                empty_args_pattern = (
-                    r'"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*\{\s*\}'
-                )
-                empty_args_match = re.search(empty_args_pattern, search_text)
-
-                # Check if this tool has empty arguments
-                if empty_args_match and empty_args_match.start() > 0:
-                    # Find which tool this empty arguments belongs to
-                    empty_args_tool_idx = 0
-                    for i in range(tool_count):
-                        if i == current_idx:
-                            # If this is our current tool and it has empty arguments
-                            if not self.streaming_state["sent_tools"][current_idx][
-                                "sent_arguments_prefix"
-                            ]:
-                                # Send empty object
-                                self.streaming_state["sent_tools"][current_idx][
-                                    "sent_arguments_prefix"
-                                ] = True
-                                self.streaming_state["sent_tools"][current_idx][
-                                    "sent_arguments"
-                                ] = "{}"
-
-                                # Update streamed_args for backward compatibility
-                                while len(self.streamed_args) <= current_idx:
-                                    self.streamed_args.append("")
-                                self.streamed_args[current_idx] += "{}"
-
-                                delta = DeltaMessage(
-                                    tool_calls=[
-                                        DeltaToolCall(
-                                            index=current_idx,
-                                            function=DeltaFunctionCall(
-                                                arguments="{}"
-                                            ).model_dump(exclude_none=True),  # type: ignore
-                                        )
-                                    ]
-                                )
-
-                                # Move to next tool if available
-                                if current_idx < tool_count - 1:
-                                    self.streaming_state["current_tool_index"] += 1
-                                    self.current_tool_id = self.streaming_state[
-                                        "current_tool_index"
-                                    ]
-
-                                return delta
-
-                # Extract arguments for current tool using regex for non-empty arguments
                 args_pattern = r'"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*(\{(?:[^{}]|(?:\{[^{}]*\}))*\})'
                 args_matches = list(re.finditer(args_pattern, search_text))
 
+                # Empty arguments should be emitted as a single "{}" delta.
+                current_tool_has_empty_args = current_idx < len(
+                    args_matches
+                ) and re.fullmatch(r"\{\s*\}", args_matches[current_idx].group(1))
+
+                if current_tool_has_empty_args:
+                    if not self.streaming_state["sent_tools"][current_idx][
+                        "sent_arguments_prefix"
+                    ]:
+                        # Send empty object
+                        self.streaming_state["sent_tools"][current_idx][
+                            "sent_arguments_prefix"
+                        ] = True
+                        self.streaming_state["sent_tools"][current_idx][
+                            "sent_arguments"
+                        ] = "{}"
+
+                        # Update streamed_args for backward compatibility
+                        while len(self.streamed_args) <= current_idx:
+                            self.streamed_args.append("")
+                        self.streamed_args[current_idx] += "{}"
+
+                        delta = DeltaMessage(
+                            tool_calls=[
+                                DeltaToolCall(
+                                    index=current_idx,
+                                    function=DeltaFunctionCall(
+                                        arguments="{}"
+                                    ).model_dump(exclude_none=True),  # type: ignore
+                                )
+                            ]
+                        )
+
+                        # Move to next tool if available
+                        if current_idx < tool_count - 1:
+                            self.streaming_state["current_tool_index"] += 1
+                            self.current_tool_id = self.streaming_state[
+                                "current_tool_index"
+                            ]
+
+                        return delta
+
+                # Extract arguments for current tool using regex for non-empty arguments
                 if current_idx < len(args_matches):
                     args_text = args_matches[current_idx].group(1)
 

@@ -53,12 +53,8 @@ class HunyuanA13BToolParser(ToolParser):
 
         self.tool_name_reg = re.compile(r'"name"\s*:\s*"([^"]+)"')
 
-        self.tool_empty_arg_reg = re.compile(
-            r'"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*\{\s*\}'
-        )
-
         # TODO: not support nested json object in fc arguments.
-        self.tool_non_empty_arg_reg = re.compile(
+        self.tool_arg_reg = re.compile(
             r'"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*(\{(?:[^{}]|(?:\{[^{}]*\}))*\})'
         )
 
@@ -313,40 +309,40 @@ class HunyuanA13BToolParser(ToolParser):
         self, current_text: str, current_idx: int, tool_count: int
     ):
         if current_idx >= 0 and current_idx < tool_count:
-            empty_args_match = self.tool_empty_arg_reg.search(current_text)
-            if empty_args_match and empty_args_match.start() > 0:
-                for i in range(tool_count):
-                    if i == current_idx:
-                        if not self.streaming_state["sent_tools"][current_idx][
-                            "sent_arguments_prefix"
-                        ]:
-                            self.streaming_state["sent_tools"][current_idx][
-                                "sent_arguments_prefix"
-                            ] = True
-                            self.streaming_state["sent_tools"][current_idx][
-                                "sent_arguments"
-                            ] = "{}"
-                            while len(self.streamed_args) <= current_idx:
-                                self.streamed_args.append("")
-                            self.streamed_args[current_idx] += "{}"
-                            delta = DeltaMessage(
-                                tool_calls=[
-                                    DeltaToolCall(
-                                        index=current_idx,
-                                        function=DeltaFunctionCall(
-                                            arguments="{}"
-                                        ).model_dump(exclude_none=True),
-                                    )
-                                ]
+            args_matches = list(self.tool_arg_reg.finditer(current_text))
+            current_tool_has_empty_args = current_idx < len(
+                args_matches
+            ) and re.fullmatch(r"\{\s*\}", args_matches[current_idx].group(1))
+            if current_tool_has_empty_args:
+                if not self.streaming_state["sent_tools"][current_idx][
+                    "sent_arguments_prefix"
+                ]:
+                    self.streaming_state["sent_tools"][current_idx][
+                        "sent_arguments_prefix"
+                    ] = True
+                    self.streaming_state["sent_tools"][current_idx][
+                        "sent_arguments"
+                    ] = "{}"
+                    while len(self.streamed_args) <= current_idx:
+                        self.streamed_args.append("")
+                    self.streamed_args[current_idx] += "{}"
+                    delta = DeltaMessage(
+                        tool_calls=[
+                            DeltaToolCall(
+                                index=current_idx,
+                                function=DeltaFunctionCall(arguments="{}").model_dump(
+                                    exclude_none=True
+                                ),
                             )
-                            if current_idx < tool_count - 1:
-                                self.streaming_state["current_tool_index"] += 1
-                                self.current_tool_id = self.streaming_state[
-                                    "current_tool_index"
-                                ]
-                            return delta
+                        ]
+                    )
+                    if current_idx < tool_count - 1:
+                        self.streaming_state["current_tool_index"] += 1
+                        self.current_tool_id = self.streaming_state[
+                            "current_tool_index"
+                        ]
+                    return delta
 
-            args_matches = list(self.tool_non_empty_arg_reg.finditer(current_text))
             if current_idx < len(args_matches):
                 args_text = args_matches[current_idx].group(1)
                 is_last_tool = current_idx == tool_count - 1

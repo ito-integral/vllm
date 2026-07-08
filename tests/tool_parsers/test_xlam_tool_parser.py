@@ -96,6 +96,28 @@ def stream_delta_message_generator(
         read_offset = new_read_offset
 
 
+def collect_streamed_tool_arguments(
+    xlam_tool_parser: xLAMToolParser,
+    xlam_tokenizer: TokenizerLike,
+    model_output: str,
+) -> dict[int, str]:
+    streamed_args: dict[int, str] = {}
+    for delta_message in stream_delta_message_generator(
+        xlam_tool_parser,
+        xlam_tokenizer,
+        model_output,
+        request=ChatCompletionRequest(model=MODEL, messages=[]),
+    ):
+        if delta_message.tool_calls:
+            for tool_call in delta_message.tool_calls:
+                arguments = tool_call.function.arguments if tool_call.function else None
+                if arguments:
+                    streamed_args[tool_call.index] = (
+                        streamed_args.get(tool_call.index, "") + arguments
+                    )
+    return streamed_args
+
+
 def test_extract_tool_calls_no_tools(xlam_tool_parser):
     model_output = "This is a test"
     extracted_tool_calls = xlam_tool_parser.extract_tool_calls(
@@ -555,3 +577,19 @@ def test_extract_tool_calls_non_ascii(xlam_tool_parser, xlam_tokenizer, streamin
 
     assert "北京" in args
     assert "\\u" not in args
+
+
+def test_streaming_preserves_args_after_empty_args_tool(
+    xlam_tool_parser, xlam_tokenizer
+):
+    model_output = (
+        '[{"name": "list_files", "arguments": {}}, '
+        '{"name": "read_file", "arguments": {"path": "README.md"}}]'
+    )
+
+    assert collect_streamed_tool_arguments(
+        xlam_tool_parser, xlam_tokenizer, model_output
+    ) == {
+        0: "{}",
+        1: '{"path": "README.md"}',
+    }
